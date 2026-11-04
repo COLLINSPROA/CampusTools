@@ -1,7 +1,7 @@
 import './style.css';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 import { getProfile, listVerifiedTotpFactors, requireAAL2, signOut } from './lib/auth.js';
-import { authenticateWithPasskey, hasVerifiedSecondFactor, listPasskeys, passkeysSupported, registerPasskey, removePasskey, signInWithPasskey } from './lib/passkeys.js';
+import { authenticateWithPasskey, hasVerifiedSecondFactor, listPasskeys, passkeysSupported, registerPasskey, removePasskey } from './lib/passkeys.js';
 
 const app = document.querySelector('#app');
 let activeUser = null;
@@ -78,7 +78,7 @@ function landing() {
     </section>
     <section id="how" class="steps-section"><span class="eyebrow">SIMPLE BY DESIGN</span><h2>Three steps. Less hassle.</h2><div class="steps"><div><b>01</b><h3>Choose a tool</h3><p>Pick the image or document task you need.</p></div><div><b>02</b><h3>Add your file</h3><p>Select a supported file from your device.</p></div><div><b>03</b><h3>Download</h3><p>Save the processed result back to your device.</p></div></div></section>
     <section id="security" class="security-band"><div class="security-symbol">◇</div><div><span class="eyebrow">SECURITY BUILT IN</span><h2>Your account deserves<br>an extra layer of protection.</h2><p>CampusTools uses secure sign-in and authenticator-based multi-factor authentication.</p></div><a class="btn light" href="#account">Create an account →</a></section>
-    <section id="account" class="auth-section"><div class="auth-intro"><span class="eyebrow">YOUR WORKSPACE</span><h2>Get started with<br><em>CampusTools.</em></h2><p>Create an account to access the tools. Sign in with your password, then verify using an authenticator app or a registered passkey.</p><div class="mini-security">◇ &nbsp; Password + authenticator code or passkey</div></div><div id="auth-card" class="auth-card"></div></section>
+    <section id="account" class="auth-section"><div class="auth-intro"><span class="eyebrow">YOUR WORKSPACE</span><h2>Get started with<br><em>CampusTools.</em></h2><p>Sign in with your password and complete required authenticator setup. After enrollment, a registered passkey can be used as an additional sign-in factor.</p><div class="mini-security">◇ &nbsp; Password + required MFA</div></div><div id="auth-card" class="auth-card"></div></section>
     <div id="notice" class="notice" hidden></div>
   `);
   renderAuthCard();
@@ -190,7 +190,6 @@ function renderAuthCard(mode = 'login') {
   }
   card.innerHTML = `
     <div class="auth-tabs" role="group" aria-label="Choose an account action"><button type="button" class="${mode==='login'?'active':''}" data-mode="login" aria-pressed="${mode === 'login'}">Sign in</button><button type="button" class="${mode==='register'?'active':''}" data-mode="register" aria-pressed="${mode === 'register'}">Create account</button></div>
-    ${mode === 'login' && passkeysSupported() ? '<button id="passkey-login" class="btn outline full" type="button">◇ &nbsp; Continue with a passkey</button><p class="login-divider">or sign in with email</p>' : ''}
     <form id="auth-form" class="form-stack">
       ${mode==='register'?'<label>Full name<input name="name" required autocomplete="name" placeholder="Your name"></label>':''}
       <label>Email address<input name="email" type="email" required autocomplete="email" placeholder="you@example.com"></label>
@@ -207,17 +206,6 @@ function renderAuthCard(mode = 'login') {
     try {
       await signInWithPasskey();
       await enterWorkspace();
-    } catch (error) {
-      notify(error.message || 'Passkey sign-in failed. Use your password instead.', 'error');
-      button.disabled = false;
-    }
-  });
-  card.querySelector('#auth-form').addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const email = form.get('email').trim();
-    const password = form.get('password');
-    try {
       if (mode === 'register') {
         const { error } = await supabase.auth.signUp({
           email, password,
@@ -239,14 +227,12 @@ async function continueToMfa() {
   const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (error) throw error;
   if (data.currentLevel === 'aal2') return enterWorkspace();
+  const factors = await listVerifiedTotpFactors();
+  if (!factors.length) return beginEnrollment();
   if (await hasVerifiedSecondFactor()) return enterWorkspace();
 
-  const [factors, passkeys] = await Promise.all([
-    listVerifiedTotpFactors(),
-    listPasskeys()
-  ]);
-  if (!factors.length && !passkeys.length) return beginEnrollment();
-  renderSecondFactorChoice(factors[0] || null, passkeys.length > 0);
+  const passkeys = await listPasskeys();
+  renderSecondFactorChoice(factors[0], passkeys.length > 0);
 }
 
 function renderSecondFactorChoice(totpFactor, hasPasskey) {
@@ -346,7 +332,7 @@ async function enterWorkspace() {
   if (error || !user) throw error || new Error('Please sign in again.');
   const aal2 = await requireAAL2();
   if (!aal2 && !(await hasVerifiedSecondFactor())) {
-    throw new Error('Verify with your authenticator code or passkey before using CampusTools.');
+    throw new Error('Complete authenticator setup or verify your second factor before using CampusTools.');
   }
   activeUser = user;
   activeProfile = await getProfile(user.id);
@@ -364,7 +350,7 @@ function renderWorkspace() {
     <section class="workspace-head"><div><span class="eyebrow">YOUR SECURE WORKSPACE</span><h1>Welcome${activeProfile.display_name ? ', '+escapeHtml(activeProfile.display_name.split(' ')[0]) : ''}.</h1><p>Choose a tool to get started. Your files are processed locally where possible.</p></div><span class="secure-pill">◇ Second factor verified</span></section>
     <div id="notice" class="notice" hidden></div>
     <section id="account-security" class="security-settings">
-      <div class="security-settings-copy"><span class="eyebrow">SIGN-IN SECURITY</span><h2>Passkeys</h2><p>Use your device's fingerprint, face recognition or screen lock as an alternative to your authenticator code.</p></div>
+      <div class="security-settings-copy"><span class="eyebrow">SIGN-IN SECURITY</span><h2>Passkeys</h2><p>Use a passkey as an additional sign-in factor after your password. Required authenticator enrollment remains in place.</p></div>
       <form id="passkey-add-form" class="passkey-add-form">
         <label for="passkey-name">Device name</label>
         <div class="passkey-add-row"><input id="passkey-name" name="name" maxlength="60" placeholder="e.g. My laptop" required><button class="btn primary" type="submit">Add passkey</button></div>

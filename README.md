@@ -66,22 +66,21 @@ In Authentication settings:
 For local development, allow `http://localhost:5173/**`.
 For a GitHub Pages project site, allow `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/**`.
 
-## 5. Deploy the passkeys Edge Functions
+## 5. Deploy the passkeys Edge Function
 
-Passkey-first sign-in and passkey settings use separate Edge Functions. Apply the database migration, then link the Supabase CLI, set the WebAuthn configuration and deploy both functions:
+Passkeys are an additional verification method after password sign-in. Every account must enroll and verify a TOTP authenticator before entering the workspace; a passkey can be registered afterward as an alternative second factor. Apply the database migration, then link the Supabase CLI, set the WebAuthn configuration and deploy the protected management function:
 
 ```bash
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push
 npx supabase secrets set WEBAUTHN_RP_ID=YOUR_SITE_HOST WEBAUTHN_ORIGIN=https://YOUR_SITE_HOST WEBAUTHN_RP_NAME=CampusTools
-npx supabase functions deploy passkey-login
 npx supabase functions deploy passkeys
 ```
 
 `WEBAUTHN_ORIGIN` must be the exact site origin, with its scheme and optional port but no path or trailing slash (for local development, use `http://localhost:5173`). `WEBAUTHN_RP_ID` must be that host or a parent domain allowed for WebAuthn. For example, use `campustools.example.com` and `https://campustools.example.com`. The function also requires Supabase's default `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment values; do not expose the service-role key in the frontend.
 
-Newly registered passkeys require a discoverable credential so users can choose one before entering a password. Existing passkeys remain available as a second factor; add a new passkey after signing in to enable one-step passkey login. If hosting the app on multiple origins, configure each origin deliberately; the login function accepts only its configured origin.
+If hosting the app on multiple origins, configure each origin deliberately; the function accepts only its configured origin.
 
 ## 6. Run locally
 

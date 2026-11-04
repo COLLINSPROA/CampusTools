@@ -86,86 +86,20 @@ alter table public.passkey_login_tickets enable row level security;
 alter table public.passkey_login_rate_limits enable row level security;
 
 revoke all on public.passkey_credentials, public.passkey_challenges,
-  public.passkey_verified_sessions, public.passkey_login_challenges,
-  public.passkey_login_tickets, public.passkey_login_rate_limits
-  from anon, authenticated;
-grant all on public.passkey_credentials, public.passkey_challenges,
-  public.passkey_verified_sessions, public.passkey_login_challenges,
-  public.passkey_login_tickets, public.passkey_login_rate_limits to service_role;
-
-create or replace function public.consume_passkey_login_rate_limit(p_requester_hash text)
-returns boolean
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_now timestamptz := clock_timestamp();
-  v_request_count integer;
-begin
-  delete from public.passkey_login_rate_limits
-  where window_started_at < v_now - interval '1 day';
-
   insert into public.passkey_login_rate_limits as limits
     (requester_hash, window_started_at, request_count)
   values (p_requester_hash, v_now, 1)
   on conflict (requester_hash) do update set
-    window_started_at = case
-      when limits.window_started_at <= v_now - interval '1 minute' then v_now
-      else limits.window_started_at
-    end,
-    request_count = case
-      when limits.window_started_at <= v_now - interval '1 minute' then 1
       else limits.request_count + 1
     end
   returning request_count into v_request_count;
 
-  return v_request_count <= 30;
-end;
-$$;
 
 revoke all on function public.consume_passkey_login_rate_limit(text)
-  from public, anon, authenticated;
-grant execute on function public.consume_passkey_login_rate_limit(text) to service_role;
+    public.passkey_verified_sessions
 
 -- Create a profile automatically for each new auth user.
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  insert into public.profiles (id, display_name, role)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data ->> 'display_name', ''),
-    'user'
-  )
-  on conflict (id) do nothing;
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-after insert on auth.users
-for each row execute procedure public.handle_new_user();
-
--- Security helper avoids recursive profiles-table RLS checks.
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select exists (
-    select 1 from public.profiles
-    where id = (select auth.uid()) and role = 'admin'
-  );
-$$;
-
+    public.passkey_verified_sessions to service_role;
 alter table public.profiles enable row level security;
 alter table public.usage_events enable row level security;
 

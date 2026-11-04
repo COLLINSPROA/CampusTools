@@ -377,8 +377,6 @@ main { width: min(1240px, 100%); margin: 0 auto; padding: 0 30px; }
 .auth-tabs { display: flex; gap: 4px; margin-bottom: 24px; padding: 4px; border-radius: 11px; background: #f2f4f8; }
 .auth-tabs button { width: 50%; min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; }
 .auth-tabs button.active { background: white; color: var(--navy); box-shadow: 0 2px 8px rgb(23 36 58 / 8%); }
-.login-divider { display: flex; align-items: center; gap: 12px; margin: 15px 0; color: #8793a3; font-size: 11px; }
-.login-divider::before, .login-divider::after { height: 1px; flex: 1; background: var(--line); content: ''; }
 .form-stack { display: grid; gap: 16px; }
 .form-stack label { display: grid; gap: 8px; color: #46566d; font-size: 12px; font-weight: 700; }
 .form-stack input, .workspace-card input, .workspace-card select, .workspace-card textarea, .control-row input, .control-row select {

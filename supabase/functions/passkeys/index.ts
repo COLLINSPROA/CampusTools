@@ -195,6 +195,33 @@ async function handleAction(context: Awaited<ReturnType<typeof getContext>>, bod
     return { verified: Boolean(data) };
   }
 
+  if (action === 'confirm-passkey-login') {
+    if (typeof body.loginTicket !== 'string') throw new HttpError(400, 'Passkey login confirmation is invalid.');
+    const ticketHash = bytesToBase64Url(new Uint8Array(
+      await crypto.subtle.digest('SHA-256', encoder.encode(body.loginTicket)),
+    ));
+    const { data, error } = await admin
+      .from('passkey_login_tickets')
+      .update({ consumed_at: new Date().toISOString() })
+      .eq('token_hash', ticketHash)
+      .eq('user_id', context.user.id)
+      .is('consumed_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .select('user_id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new HttpError(401, 'Passkey login expired. Start again.');
+
+    const { error: sessionError } = await admin.from('passkey_verified_sessions').upsert({
+      session_id: context.sessionId,
+      user_id: context.user.id,
+      expires_at: new Date(Date.now() + passkeySessionLifetimeMs).toISOString(),
+      verified_at: new Date().toISOString(),
+    });
+    if (sessionError) throw sessionError;
+    return { verified: true };
+  }
+
   if (action === 'list') {
     const { data, error } = await admin
       .from('passkey_credentials')
@@ -237,7 +264,7 @@ async function handleAction(context: Awaited<ReturnType<typeof getContext>>, bod
         transports: credential.transports,
       })),
       authenticatorSelection: {
-        residentKey: 'preferred',
+        residentKey: 'required',
         userVerification: 'required',
       },
     });

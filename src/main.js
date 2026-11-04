@@ -1,10 +1,7 @@
 import './style.css';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 import { getProfile, listVerifiedTotpFactors, requireAAL2, signOut } from './lib/auth.js';
-import { authenticateWithPasskey, hasVerifiedSecondFactor, listPasskeys, passkeysSupported, registerPasskey, removePasskey } from './lib/passkeys.js';
-import { convertOrResizeImage, removeImageBackground } from './tools/image-tools.js';
-import { imagesToPdf, mergePdfs, splitPdf, textToPdf, pdfToImages } from './tools/pdf-tools.js';
-import { docxToText, docxToPdfTextOnly, spreadsheetToCsv } from './tools/document-tools.js';
+import { authenticateWithPasskey, hasVerifiedSecondFactor, listPasskeys, passkeysSupported, registerPasskey, removePasskey, signInWithPasskey } from './lib/passkeys.js';
 
 const app = document.querySelector('#app');
 let activeUser = null;
@@ -23,7 +20,7 @@ function shell(content) {
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="topbar">
       <a class="brand" href="#"><span class="brand-icon">C</span><span>Campus<span>Tools</span></span></a>
-      <nav aria-label="Main navigation"><a href="#tools">Tools</a><a href="#how">How it works</a><a href="#security">Security</a></nav>
+      <nav id="main-nav" aria-label="Main navigation"><a href="#tools">Tools</a><a href="#how">How it works</a><a href="#security">Security</a></nav>
       <div id="top-actions"><a class="btn primary small" href="#account">Get started <span aria-hidden="true">→</span></a></div>
     </header>
     <main id="main-content">${content}</main>
@@ -193,6 +190,7 @@ function renderAuthCard(mode = 'login') {
   }
   card.innerHTML = `
     <div class="auth-tabs" role="group" aria-label="Choose an account action"><button type="button" class="${mode==='login'?'active':''}" data-mode="login" aria-pressed="${mode === 'login'}">Sign in</button><button type="button" class="${mode==='register'?'active':''}" data-mode="register" aria-pressed="${mode === 'register'}">Create account</button></div>
+    ${mode === 'login' && passkeysSupported() ? '<button id="passkey-login" class="btn outline full" type="button">◇ &nbsp; Continue with a passkey</button><p class="login-divider">or sign in with email</p>' : ''}
     <form id="auth-form" class="form-stack">
       ${mode==='register'?'<label>Full name<input name="name" required autocomplete="name" placeholder="Your name"></label>':''}
       <label>Email address<input name="email" type="email" required autocomplete="email" placeholder="you@example.com"></label>
@@ -203,6 +201,17 @@ function renderAuthCard(mode = 'login') {
     </form>`;
   card.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => renderAuthCard(button.dataset.mode)));
   card.querySelector('#forgot-password')?.addEventListener('click', () => renderAuthCard('forgot'));
+  card.querySelector('#passkey-login')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await signInWithPasskey();
+      await enterWorkspace();
+    } catch (error) {
+      notify(error.message || 'Passkey sign-in failed. Use your password instead.', 'error');
+      button.disabled = false;
+    }
+  });
   card.querySelector('#auth-form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -230,6 +239,7 @@ async function continueToMfa() {
   const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (error) throw error;
   if (data.currentLevel === 'aal2') return enterWorkspace();
+  if (await hasVerifiedSecondFactor()) return enterWorkspace();
 
   const [factors, passkeys] = await Promise.all([
     listVerifiedTotpFactors(),
@@ -318,7 +328,7 @@ function renderMfaEnrollment(qrCode, secret) {
 
 function renderMfaChallenge() {
   const card = document.querySelector('#auth-card');
-  card.innerHTML = `<div class="mfa-panel"><div class="tool-icon purple">◇</div><span class="eyebrow">TWO-FACTOR VERIFICATION</span><h2>Check it's really you.</h2><p>Open your authenticator app and enter the current six-digit CampusTools code.</p><form id="challenge-form" class="form-stack"><label>Authenticator code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label><button class="btn primary full">Verify and continue →</button></form><button id="back-login" class="text-button">Back to sign in</button></div>`;
+  card.innerHTML = `<div class="mfa-panel"><div class="tool-icon purple">◇</div><span class="eyebrow">TWO-FACTOR VERIFICATION</span><h2>Check it's really you.</h2><p>Enter the current six-digit code from the authenticator app you previously set up.</p><p class="form-note">The setup QR code is shown only during enrollment. If you no longer have this authenticator, contact the site administrator to recover your account.</p><form id="challenge-form" class="form-stack"><label>Authenticator code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label><button class="btn primary full">Verify and continue →</button></form><button id="back-login" class="text-button">Back to sign in</button></div>`;
   card.querySelector('#challenge-form').addEventListener('submit', async event => {
     event.preventDefault();
     const code = new FormData(event.currentTarget).get('code').trim();
@@ -346,12 +356,14 @@ async function enterWorkspace() {
 function renderWorkspace() {
   const role = activeProfile.role;
   const top = document.querySelector('#top-actions');
+  const nav = document.querySelector('#main-nav');
   if (top) top.innerHTML = `<span class="user-chip">${escapeHtml(activeProfile.display_name || activeUser.email)}</span><button id="logout" class="btn outline small">Sign out</button>`;
+  if (nav) nav.innerHTML = '<a href="#workspace-tools">Tools</a><a href="#account-security">Account security</a>';
   const main = document.querySelector('main');
   main.innerHTML = `
     <section class="workspace-head"><div><span class="eyebrow">YOUR SECURE WORKSPACE</span><h1>Welcome${activeProfile.display_name ? ', '+escapeHtml(activeProfile.display_name.split(' ')[0]) : ''}.</h1><p>Choose a tool to get started. Your files are processed locally where possible.</p></div><span class="secure-pill">◇ Second factor verified</span></section>
     <div id="notice" class="notice" hidden></div>
-    <section class="security-settings">
+    <section id="account-security" class="security-settings">
       <div class="security-settings-copy"><span class="eyebrow">SIGN-IN SECURITY</span><h2>Passkeys</h2><p>Use your device's fingerprint, face recognition or screen lock as an alternative to your authenticator code.</p></div>
       <form id="passkey-add-form" class="passkey-add-form">
         <label for="passkey-name">Device name</label>
@@ -360,32 +372,126 @@ function renderWorkspace() {
       </form>
       <div id="passkey-list" class="passkey-list" aria-live="polite"></div>
     </section>
-    <section class="workspace-grid">
-      <div class="workspace-card"><div class="tool-icon purple">▧</div><span class="tag">IMAGE TOOLS</span><h3>Remove background</h3><p>Remove an image background and download a transparent PNG.</p><input id="bg-file" type="file" accept="image/*"><button id="bg-run" class="btn primary full">Remove background</button></div>
-      <div class="workspace-card"><div class="tool-icon blue">⇄</div><span class="tag">IMAGE TOOLS</span><h3>Convert, resize & compress</h3><p>Convert images to PNG, JPG or WebP and optionally resize.</p><input id="image-file" type="file" accept="image/*"><div class="control-row"><select id="image-format"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option></select><input id="image-width" type="number" min="0" placeholder="Max width (optional)"></div><button id="image-run" class="btn primary full">Convert image</button></div>
-      <div class="workspace-card"><div class="tool-icon red">PDF</div><span class="tag">PDF TOOLS</span><h3>Merge PDF files</h3><p>Combine multiple PDF documents into one file.</p><input id="merge-files" type="file" accept="application/pdf,.pdf" multiple><button id="merge-run" class="btn primary full">Merge PDFs</button></div>
-      <div class="workspace-card"><div class="tool-icon red">PDF</div><span class="tag">PDF TOOLS</span><h3>Extract PDF pages</h3><p>Save selected pages, e.g. 1-3,5, from a PDF.</p><input id="split-file" type="file" accept="application/pdf,.pdf"><input id="page-range" placeholder="Page range, e.g. 1-3,5"><button id="split-run" class="btn primary full">Extract pages</button></div>
-      <div class="workspace-card"><div class="tool-icon blue">▧</div><span class="tag">PDF TOOLS</span><h3>Images to PDF</h3><p>Combine JPG or PNG images into a PDF.</p><input id="images-pdf-files" type="file" accept="image/png,image/jpeg" multiple><button id="images-pdf-run" class="btn primary full">Create PDF</button></div>
-      <div class="workspace-card"><div class="tool-icon red">PDF</div><span class="tag">PDF TOOLS</span><h3>PDF to images</h3><p>Render each PDF page as a PNG image.</p><input id="pdf-images-file" type="file" accept="application/pdf,.pdf"><button id="pdf-images-run" class="btn primary full">Convert pages to PNG</button></div>
-      <div class="workspace-card"><div class="tool-icon dark">T</div><span class="tag">DOCUMENT TOOLS</span><h3>Text to PDF</h3><p>Paste notes or an assignment and create a PDF.</p><textarea id="text-content" rows="4" placeholder="Paste or type your text here…"></textarea><button id="text-pdf-run" class="btn primary full">Download PDF</button></div>
-      <div class="workspace-card"><div class="tool-icon green">W</div><span class="tag">DOCUMENT TOOLS</span><h3>Word (DOCX) to text</h3><p>Extract text from a DOCX file. Basic formatting is not retained.</p><input id="docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><div class="button-pair"><button id="docx-text-run" class="btn primary">Download TXT</button><button id="docx-pdf-run" class="btn outline">Text PDF</button></div></div>
-      <div class="workspace-card"><div class="tool-icon yellow">X</div><span class="tag">DOCUMENT TOOLS</span><h3>Excel to CSV</h3><p>Export the first worksheet of an Excel workbook to CSV.</p><input id="xlsx-file" type="file" accept=".xlsx,.xls,.xlsm"><button id="xlsx-run" class="btn primary full">Convert to CSV</button></div>
+    <section class="tool-discovery" aria-label="Find a tool">
+      <label class="tool-search-label" for="workspace-search">Find a tool</label>
+      <div class="tool-discovery-row">
+        <input id="workspace-search" class="tool-search" type="search" placeholder="Search tools" autocomplete="off">
+        <div class="tool-filters" role="group" aria-label="Filter workspace tools">
+          <button type="button" class="filter-chip active" data-workspace-filter="all" aria-pressed="true">All tools</button>
+          <button type="button" class="filter-chip" data-workspace-filter="image" aria-pressed="false">Images</button>
+          <button type="button" class="filter-chip" data-workspace-filter="document" aria-pressed="false">Documents</button>
+        </div>
+      </div>
+      <p id="workspace-results" class="tool-results" aria-live="polite"></p>
     </section>
+    <section id="workspace-tools" class="workspace-grid" aria-label="Available tools">
+      <article class="workspace-card" data-workspace-tool data-category="image"><div class="tool-icon purple">▧</div><span class="tag">IMAGE TOOLS</span><h3>Remove background</h3><p>Remove an image background and download a transparent PNG.</p><input id="bg-file" type="file" accept="image/*"><button id="bg-run" class="btn primary full">Remove background</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="image"><div class="tool-icon blue">⇄</div><span class="tag">IMAGE TOOLS</span><h3>Convert, resize & compress</h3><p>Convert images to PNG, JPG or WebP and optionally resize.</p><input id="image-file" type="file" accept="image/*"><div class="control-row"><select id="image-format"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option></select><input id="image-width" type="number" min="0" placeholder="Max width (optional)"></div><button id="image-run" class="btn primary full">Convert image</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon red">PDF</div><span class="tag">PDF TOOLS</span><h3>Merge PDF files</h3><p>Combine multiple PDF documents into one file.</p><input id="merge-files" type="file" accept="application/pdf,.pdf" multiple><button id="merge-run" class="btn primary full">Merge PDFs</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon red">PDF</div><span class="tag">PDF TOOLS</span><h3>Extract PDF pages</h3><p>Save selected pages, e.g. 1-3,5, from a PDF.</p><input id="split-file" type="file" accept="application/pdf,.pdf"><input id="page-range" placeholder="Page range, e.g. 1-3,5"><button id="split-run" class="btn primary full">Extract pages</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon blue">▧</div><span class="tag">PDF TOOLS</span><h3>Images to PDF</h3><p>Combine JPG or PNG images into a PDF.</p><input id="images-pdf-files" type="file" accept="image/png,image/jpeg" multiple><button id="images-pdf-run" class="btn primary full">Create PDF</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon red">PDF</div><span class="tag">PDF TOOLS</span><h3>PDF to images</h3><p>Render each PDF page as a PNG image.</p><input id="pdf-images-file" type="file" accept="application/pdf,.pdf"><button id="pdf-images-run" class="btn primary full">Convert pages to PNG</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon dark">T</div><span class="tag">DOCUMENT TOOLS</span><h3>Text to PDF</h3><p>Paste notes or an assignment and create a PDF.</p><textarea id="text-content" rows="4" placeholder="Paste or type your text here…"></textarea><button id="text-pdf-run" class="btn primary full">Download PDF</button></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon green">W</div><span class="tag">DOCUMENT TOOLS</span><h3>Word (DOCX) to text</h3><p>Extract text from a DOCX file. Basic formatting is not retained.</p><input id="docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><div class="button-pair"><button id="docx-text-run" class="btn primary">Download TXT</button><button id="docx-pdf-run" class="btn outline">Text PDF</button></div></article>
+      <article class="workspace-card" data-workspace-tool data-category="document"><div class="tool-icon yellow">X</div><span class="tag">DOCUMENT TOOLS</span><h3>Excel to CSV</h3><p>Export the first worksheet of an Excel workbook to CSV.</p><input id="xlsx-file" type="file" accept=".xlsx,.xls,.xlsm"><button id="xlsx-run" class="btn primary full">Convert to CSV</button></article>
+    </section>
+    <p id="workspace-empty" class="tool-empty" hidden>No tools match that search. Try another word or filter.</p>
     <section class="limitations"><b>About file privacy and compatibility</b><p>Most tools in this starter build run in your browser. Very large files may use substantial device memory. DOCX-to-PDF currently exports extracted text only; complex page layout is not preserved. Full PDF-to-Word and PowerPoint conversion require a separate conversion engine and are planned for a later phase.</p></section>
     ${role === 'admin' ? `<section class="admin-panel"><span class="eyebrow">ADMINISTRATION</span><h2>Administrator access</h2><p>You are signed in with the administrator role. Admin-only management features can be added here.</p><span class="secure-pill">Admin role · MFA verified</span></section>` : ''}
   `;
   document.querySelector('#logout')?.addEventListener('click', async () => { await signOut(); activeUser = null; activeProfile = null; location.reload(); });
+  bindWorkspaceToolDiscovery();
   bindPasskeySettings();
-  bindTool('bg-run', async () => removeImageBackground(requiredFile('bg-file')));
-  bindTool('image-run', async () => convertOrResizeImage(requiredFile('image-file'), { format: value('image-format'), maxWidth: Number(value('image-width')) || 0 }));
-  bindTool('merge-run', async () => mergePdfs([...document.querySelector('#merge-files').files]));
-  bindTool('split-run', async () => splitPdf(requiredFile('split-file'), value('page-range')));
-  bindTool('images-pdf-run', async () => imagesToPdf([...document.querySelector('#images-pdf-files').files]));
-  bindTool('pdf-images-run', async () => pdfToImages(requiredFile('pdf-images-file')));
-  bindTool('text-pdf-run', async () => textToPdf(value('text-content')));
-  bindTool('docx-text-run', async () => docxToText(requiredFile('docx-file')));
-  bindTool('docx-pdf-run', async () => docxToPdfTextOnly(requiredFile('docx-file')));
-  bindTool('xlsx-run', async () => spreadsheetToCsv(requiredFile('xlsx-file')));
+  bindTool('bg-run', async () => {
+    const file = requiredFile('bg-file');
+    const { removeImageBackground } = await import('./tools/image-tools.js');
+    return removeImageBackground(file);
+  });
+  bindTool('image-run', async () => {
+    const file = requiredFile('image-file');
+    const { convertOrResizeImage } = await import('./tools/image-tools.js');
+    return convertOrResizeImage(file, { format: value('image-format'), maxWidth: Number(value('image-width')) || 0 });
+  });
+  bindTool('merge-run', async () => {
+    const files = [...document.querySelector('#merge-files').files];
+    if (!files.length) throw new Error('Please choose at least one PDF file.');
+    const { mergePdfs } = await import('./tools/pdf-tools.js');
+    return mergePdfs(files);
+  });
+  bindTool('split-run', async () => {
+    const file = requiredFile('split-file');
+    const { splitPdf } = await import('./tools/pdf-tools.js');
+    return splitPdf(file, value('page-range'));
+  });
+  bindTool('images-pdf-run', async () => {
+    const files = [...document.querySelector('#images-pdf-files').files];
+    if (!files.length) throw new Error('Please choose at least one image file.');
+    const { imagesToPdf } = await import('./tools/pdf-tools.js');
+    return imagesToPdf(files);
+  });
+  bindTool('pdf-images-run', async () => {
+    const file = requiredFile('pdf-images-file');
+    const { pdfToImages } = await import('./tools/pdf-tools.js');
+    return pdfToImages(file);
+  });
+  bindTool('text-pdf-run', async () => {
+    const { textToPdf } = await import('./tools/pdf-tools.js');
+    return textToPdf(value('text-content'));
+  });
+  bindTool('docx-text-run', async () => {
+    const file = requiredFile('docx-file');
+    const { docxToText } = await import('./tools/document-tools.js');
+    return docxToText(file);
+  });
+  bindTool('docx-pdf-run', async () => {
+    const file = requiredFile('docx-file');
+    const { docxToPdfTextOnly } = await import('./tools/document-tools.js');
+    return docxToPdfTextOnly(file);
+  });
+  bindTool('xlsx-run', async () => {
+    const file = requiredFile('xlsx-file');
+    const { spreadsheetToCsv } = await import('./tools/document-tools.js');
+    return spreadsheetToCsv(file);
+  });
+}
+
+function bindWorkspaceToolDiscovery() {
+  const search = document.querySelector('#workspace-search');
+  const cards = [...document.querySelectorAll('[data-workspace-tool]')];
+  const resultCount = document.querySelector('#workspace-results');
+  const emptyState = document.querySelector('#workspace-empty');
+  let activeFilter = 'all';
+
+  function updateTools() {
+    const query = search.value.trim().toLocaleLowerCase();
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+      const matchesQuery = card.textContent.toLocaleLowerCase().includes(query);
+      const matchesFilter = activeFilter === 'all' || card.dataset.category === activeFilter;
+      const isVisible = matchesQuery && matchesFilter;
+      card.hidden = !isVisible;
+      if (isVisible) visibleCount += 1;
+    });
+
+    resultCount.textContent = `${visibleCount} ${visibleCount === 1 ? 'tool' : 'tools'} available`;
+    emptyState.hidden = visibleCount > 0;
+  }
+
+  search.addEventListener('input', updateTools);
+  document.querySelectorAll('[data-workspace-filter]').forEach(button => {
+    button.addEventListener('click', () => {
+      activeFilter = button.dataset.workspaceFilter;
+      document.querySelectorAll('[data-workspace-filter]').forEach(filterButton => {
+        const isActive = filterButton === button;
+        filterButton.classList.toggle('active', isActive);
+        filterButton.setAttribute('aria-pressed', String(isActive));
+      });
+      updateTools();
+    });
+  });
+
+  updateTools();
 }
 
 function bindPasskeySettings() {
@@ -454,9 +560,20 @@ function requiredFile(id) {
 }
 function value(id) { return document.getElementById(id).value; }
 function bindTool(id, action) {
-  document.getElementById(id)?.addEventListener('click', async () => {
-    try { await action(); notify('Your file is ready to download.', 'success'); }
+  document.getElementById(id)?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    try {
+      notify('Processing your file...');
+      await action();
+      notify('Your file is ready to download.', 'success');
+    }
     catch (error) { notify(error.message || 'The operation failed.', 'error'); }
+    finally {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
   });
 }
 function escapeHtml(value) {

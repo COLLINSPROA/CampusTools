@@ -1,9 +1,3 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
-
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -14,6 +8,7 @@ function downloadBlob(blob, filename) {
 }
 
 export async function imagesToPdf(files) {
+  const { PDFDocument } = await import('pdf-lib');
   const pdf = await PDFDocument.create();
   for (const file of files) {
     const bytes = await file.arrayBuffer();
@@ -27,6 +22,7 @@ export async function imagesToPdf(files) {
 }
 
 export async function mergePdfs(files) {
+  const { PDFDocument } = await import('pdf-lib');
   const output = await PDFDocument.create();
   for (const file of files) {
     const source = await PDFDocument.load(await file.arrayBuffer());
@@ -37,6 +33,7 @@ export async function mergePdfs(files) {
 }
 
 export async function splitPdf(file, rangeText) {
+  const { PDFDocument } = await import('pdf-lib');
   const source = await PDFDocument.load(await file.arrayBuffer());
   const indexes = parsePageRange(rangeText, source.getPageCount());
   const output = await PDFDocument.create();
@@ -60,6 +57,7 @@ function parsePageRange(value, total) {
 }
 
 export async function textToPdf(text) {
+  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pageWidth = 595.28, pageHeight = 841.89, margin = 48, fontSize = 11;
@@ -80,6 +78,9 @@ export async function textToPdf(text) {
 }
 
 export async function pdfToImages(file) {
+  const pdfjsLib = await import('pdfjs-dist');
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
   const data = new Uint8Array(await file.arrayBuffer());
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {

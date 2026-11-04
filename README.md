@@ -66,7 +66,24 @@ In Authentication settings:
 For local development, allow `http://localhost:5173/**`.
 For a GitHub Pages project site, allow `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/**`.
 
-## 5. Run locally
+## 5. Deploy the passkeys Edge Functions
+
+Passkey-first sign-in and passkey settings use separate Edge Functions. Apply the database migration, then link the Supabase CLI, set the WebAuthn configuration and deploy both functions:
+
+```bash
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push
+npx supabase secrets set WEBAUTHN_RP_ID=YOUR_SITE_HOST WEBAUTHN_ORIGIN=https://YOUR_SITE_HOST WEBAUTHN_RP_NAME=CampusTools
+npx supabase functions deploy passkey-login
+npx supabase functions deploy passkeys
+```
+
+`WEBAUTHN_ORIGIN` must be the exact site origin, with its scheme and optional port but no path or trailing slash (for local development, use `http://localhost:5173`). `WEBAUTHN_RP_ID` must be that host or a parent domain allowed for WebAuthn. For example, use `campustools.example.com` and `https://campustools.example.com`. The function also requires Supabase's default `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment values; do not expose the service-role key in the frontend.
+
+Newly registered passkeys require a discoverable credential so users can choose one before entering a password. Existing passkeys remain available as a second factor; add a new passkey after signing in to enable one-step passkey login. If hosting the app on multiple origins, configure each origin deliberately; the login function accepts only its configured origin.
+
+## 6. Run locally
 
 ```bash
 npm run dev
@@ -74,7 +91,7 @@ npm run dev
 
 Open the local URL printed by Vite.
 
-## 6. Create your first administrator
+## 7. Create your first administrator
 
 1. Register your own account using the site.
 2. Confirm your email if email confirmation is enabled.
@@ -90,7 +107,7 @@ where id = 'YOUR-AUTH-USER-UUID';
 
 Only run this manually for your own trusted account. The browser never gets permission to update `role`. Never add a public "make me admin" form or endpoint.
 
-## 7. Deploy to GitHub Pages
+## 8. Deploy to GitHub Pages
 
 GitHub Pages serves static files; it does not run Node.js as a server. Build the app first:
 

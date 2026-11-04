@@ -1,2 +1,5 @@
 [functions.passkeys]
 verify_jwt = true
+
+[functions.passkey-login]
+verify_jwt = false

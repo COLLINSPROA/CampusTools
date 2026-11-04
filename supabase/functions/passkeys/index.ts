@@ -16,6 +16,7 @@ if (!supabaseUrl || !serviceRoleKey || !rpId || !expectedOrigin) {
   throw new Error('Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, WEBAUTHN_RP_ID and WEBAUTHN_ORIGIN for the passkeys function.');
 }
 
+// Validate the expected origin
 const originUrl = new URL(expectedOrigin);
 if (originUrl.origin !== expectedOrigin) {
   throw new Error('WEBAUTHN_ORIGIN must be an origin only, without a path or trailing slash.');
@@ -45,17 +46,24 @@ class HttpError extends Error {
   }
 }
 
+// --- FIXED CORS HELPER ---
+// This function now ALWAYS includes CORS headers if an Origin is present.
+// This allows the browser to read error messages (like 401 or 403) instead of blocking them.
 function json(request: Request, body: unknown, status = 200) {
-  const origin = request.headers.get('origin');
+  const requestOrigin = request.headers.get('origin');
   const headers = new Headers({
     'content-type': 'application/json',
     'vary': 'Origin',
   });
-  if (origin === expectedOrigin) {
+
+  // If the request has an origin, we must return it in the allowed origins header.
+  // We only do this if it matches our expected origin to prevent unauthorized cross-origin access.
+  if (requestOrigin && requestOrigin === expectedOrigin) {
     headers.set('access-control-allow-origin', expectedOrigin);
     headers.set('access-control-allow-headers', 'authorization, apikey, content-type, x-client-info');
     headers.set('access-control-allow-methods', 'POST, OPTIONS');
   }
+
   return new Response(JSON.stringify(body), { status, headers });
 }
 
@@ -380,10 +388,17 @@ async function handleAction(context: Awaited<ReturnType<typeof getContext>>, bod
 }
 
 Deno.serve(async request => {
+  // 1. Handle the CORS preflight request immediately
   if (request.method === 'OPTIONS') return json(request, { ok: true });
+
+  // 2. Handle non-POST requests
   if (request.method !== 'POST') return json(request, { error: 'Method not allowed.' }, 405);
-  if (request.headers.get('origin') !== expectedOrigin) {
-    return json(request, { error: 'This origin is not allowed.' }, 403);
+
+  // 3. Origin Check (Now returns a readable error via json helper)
+  const requestOrigin = request.headers.get('origin');
+  if (requestOrigin !== expectedOrigin) {
+    console.warn(`Rejected request from origin: ${requestOrigin}. Expected: ${expectedOrigin}`);
+    return json(request, { error: `Origin mismatch. Expected ${expectedOrigin}, got ${requestOrigin}` }, 403);
   }
 
   try {

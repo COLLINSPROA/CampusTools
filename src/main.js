@@ -1,6 +1,7 @@
 import './style.css';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 import { getProfile, listVerifiedTotpFactors, requireAAL2, signOut } from './lib/auth.js';
+import { authenticateWithPasskey, hasVerifiedSecondFactor, listPasskeys, passkeysSupported, registerPasskey, removePasskey } from './lib/passkeys.js';
 import { convertOrResizeImage, removeImageBackground } from './tools/image-tools.js';
 import { imagesToPdf, mergePdfs, splitPdf, textToPdf, pdfToImages } from './tools/pdf-tools.js';
 import { docxToText, docxToPdfTextOnly, spreadsheetToCsv } from './tools/document-tools.js';
@@ -80,7 +81,7 @@ function landing() {
     </section>
     <section id="how" class="steps-section"><span class="eyebrow">SIMPLE BY DESIGN</span><h2>Three steps. Less hassle.</h2><div class="steps"><div><b>01</b><h3>Choose a tool</h3><p>Pick the image or document task you need.</p></div><div><b>02</b><h3>Add your file</h3><p>Select a supported file from your device.</p></div><div><b>03</b><h3>Download</h3><p>Save the processed result back to your device.</p></div></div></section>
     <section id="security" class="security-band"><div class="security-symbol">◇</div><div><span class="eyebrow">SECURITY BUILT IN</span><h2>Your account deserves<br>an extra layer of protection.</h2><p>CampusTools uses secure sign-in and authenticator-based multi-factor authentication.</p></div><a class="btn light" href="#account">Create an account →</a></section>
-    <section id="account" class="auth-section"><div class="auth-intro"><span class="eyebrow">YOUR WORKSPACE</span><h2>Get started with<br><em>CampusTools.</em></h2><p>Create an account to access the tools. Authenticator MFA is required for every account.</p><div class="mini-security">◇ &nbsp; Password + authenticator code</div></div><div id="auth-card" class="auth-card"></div></section>
+    <section id="account" class="auth-section"><div class="auth-intro"><span class="eyebrow">YOUR WORKSPACE</span><h2>Get started with<br><em>CampusTools.</em></h2><p>Create an account to access the tools. Sign in with your password, then verify using an authenticator app or a registered passkey.</p><div class="mini-security">◇ &nbsp; Password + authenticator code or passkey</div></div><div id="auth-card" class="auth-card"></div></section>
     <div id="notice" class="notice" hidden></div>
   `);
   renderAuthCard();
@@ -226,17 +227,57 @@ function renderAuthCard(mode = 'login') {
 }
 
 async function continueToMfa() {
-  const factors = await listVerifiedTotpFactors();
-  if (!factors.length) return beginEnrollment();
-  const factor = factors[0];
-  currentFactorId = factor.id;
   const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (error) throw error;
   if (data.currentLevel === 'aal2') return enterWorkspace();
-  const challenge = await supabase.auth.mfa.challenge({ factorId: currentFactorId });
-  if (challenge.error) throw challenge.error;
-  currentChallengeId = challenge.data.id;
-  renderMfaChallenge();
+
+  const [factors, passkeys] = await Promise.all([
+    listVerifiedTotpFactors(),
+    listPasskeys()
+  ]);
+  if (!factors.length && !passkeys.length) return beginEnrollment();
+  renderSecondFactorChoice(factors[0] || null, passkeys.length > 0);
+}
+
+function renderSecondFactorChoice(totpFactor, hasPasskey) {
+  const card = document.querySelector('#auth-card');
+  const canUsePasskey = hasPasskey && passkeysSupported();
+  card.innerHTML = `
+    <div class="mfa-panel">
+      <span class="eyebrow">SECOND-FACTOR VERIFICATION</span>
+      <h2>Verify it's you.</h2>
+      <p>Choose one of the verification methods registered to your account.</p>
+      <div class="factor-options">
+        ${canUsePasskey ? '<button id="use-passkey" class="btn primary full" type="button">Use passkey / fingerprint</button>' : ''}
+        ${totpFactor ? '<button id="use-totp" class="btn outline full" type="button">Use authenticator code</button>' : ''}
+      </div>
+      ${hasPasskey && !canUsePasskey ? `<p class="form-note">${totpFactor ? 'This browser does not support passkeys. Use your authenticator app on this device.' : 'This browser does not support passkeys. Sign in from a supported device or contact the site administrator for account recovery.'}</p>` : ''}
+      <button id="back-login" class="text-button" type="button">Back to sign in</button>
+    </div>`;
+  card.querySelector('#use-passkey')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await authenticateWithPasskey();
+      await enterWorkspace();
+    } catch (error) {
+      notify(error.message || 'Passkey verification failed.', 'error');
+      button.disabled = false;
+    }
+  });
+  card.querySelector('#use-totp')?.addEventListener('click', async () => {
+    try {
+      currentFactorId = totpFactor.id;
+      const challenge = await supabase.auth.mfa.challenge({ factorId: currentFactorId });
+      if (challenge.error) throw challenge.error;
+      currentChallengeId = challenge.data.id;
+      renderMfaChallenge();
+    } catch (error) { notify(error.message, 'error'); }
+  });
+  card.querySelector('#back-login').addEventListener('click', async () => {
+    await signOut();
+    renderAuthCard();
+  });
 }
 
 async function beginEnrollment() {
@@ -294,7 +335,9 @@ async function enterWorkspace() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) throw error || new Error('Please sign in again.');
   const aal2 = await requireAAL2();
-  if (!aal2) throw new Error('MFA verification is required before using CampusTools.');
+  if (!aal2 && !(await hasVerifiedSecondFactor())) {
+    throw new Error('Verify with your authenticator code or passkey before using CampusTools.');
+  }
   activeUser = user;
   activeProfile = await getProfile(user.id);
   renderWorkspace();
@@ -306,8 +349,17 @@ function renderWorkspace() {
   if (top) top.innerHTML = `<span class="user-chip">${escapeHtml(activeProfile.display_name || activeUser.email)}</span><button id="logout" class="btn outline small">Sign out</button>`;
   const main = document.querySelector('main');
   main.innerHTML = `
-    <section class="workspace-head"><div><span class="eyebrow">YOUR SECURE WORKSPACE</span><h1>Welcome${activeProfile.display_name ? ', '+escapeHtml(activeProfile.display_name.split(' ')[0]) : ''}.</h1><p>Choose a tool to get started. Your files are processed locally where possible.</p></div><span class="secure-pill">◇ MFA verified</span></section>
+    <section class="workspace-head"><div><span class="eyebrow">YOUR SECURE WORKSPACE</span><h1>Welcome${activeProfile.display_name ? ', '+escapeHtml(activeProfile.display_name.split(' ')[0]) : ''}.</h1><p>Choose a tool to get started. Your files are processed locally where possible.</p></div><span class="secure-pill">◇ Second factor verified</span></section>
     <div id="notice" class="notice" hidden></div>
+    <section class="security-settings">
+      <div class="security-settings-copy"><span class="eyebrow">SIGN-IN SECURITY</span><h2>Passkeys</h2><p>Use your device's fingerprint, face recognition or screen lock as an alternative to your authenticator code.</p></div>
+      <form id="passkey-add-form" class="passkey-add-form">
+        <label for="passkey-name">Device name</label>
+        <div class="passkey-add-row"><input id="passkey-name" name="name" maxlength="60" placeholder="e.g. My laptop" required><button class="btn primary" type="submit">Add passkey</button></div>
+        <p id="passkey-support-note" class="form-note"></p>
+      </form>
+      <div id="passkey-list" class="passkey-list" aria-live="polite"></div>
+    </section>
     <section class="workspace-grid">
       <div class="workspace-card"><div class="tool-icon purple">▧</div><span class="tag">IMAGE TOOLS</span><h3>Remove background</h3><p>Remove an image background and download a transparent PNG.</p><input id="bg-file" type="file" accept="image/*"><button id="bg-run" class="btn primary full">Remove background</button></div>
       <div class="workspace-card"><div class="tool-icon blue">⇄</div><span class="tag">IMAGE TOOLS</span><h3>Convert, resize & compress</h3><p>Convert images to PNG, JPG or WebP and optionally resize.</p><input id="image-file" type="file" accept="image/*"><div class="control-row"><select id="image-format"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option></select><input id="image-width" type="number" min="0" placeholder="Max width (optional)"></div><button id="image-run" class="btn primary full">Convert image</button></div>
@@ -323,6 +375,7 @@ function renderWorkspace() {
     ${role === 'admin' ? `<section class="admin-panel"><span class="eyebrow">ADMINISTRATION</span><h2>Administrator access</h2><p>You are signed in with the administrator role. Admin-only management features can be added here.</p><span class="secure-pill">Admin role · MFA verified</span></section>` : ''}
   `;
   document.querySelector('#logout')?.addEventListener('click', async () => { await signOut(); activeUser = null; activeProfile = null; location.reload(); });
+  bindPasskeySettings();
   bindTool('bg-run', async () => removeImageBackground(requiredFile('bg-file')));
   bindTool('image-run', async () => convertOrResizeImage(requiredFile('image-file'), { format: value('image-format'), maxWidth: Number(value('image-width')) || 0 }));
   bindTool('merge-run', async () => mergePdfs([...document.querySelector('#merge-files').files]));
@@ -333,6 +386,65 @@ function renderWorkspace() {
   bindTool('docx-text-run', async () => docxToText(requiredFile('docx-file')));
   bindTool('docx-pdf-run', async () => docxToPdfTextOnly(requiredFile('docx-file')));
   bindTool('xlsx-run', async () => spreadsheetToCsv(requiredFile('xlsx-file')));
+}
+
+function bindPasskeySettings() {
+  const form = document.querySelector('#passkey-add-form');
+  const supportNote = document.querySelector('#passkey-support-note');
+  const list = document.querySelector('#passkey-list');
+  if (!form || !supportNote || !list) return;
+
+  const supported = passkeysSupported();
+  form.querySelector('button').disabled = !supported;
+  supportNote.textContent = supported
+    ? 'Passkeys require HTTPS (localhost is supported for development).'
+    : 'This browser or device does not support passkeys.';
+
+  async function refresh() {
+    list.innerHTML = '<p class="form-note">Loading registered passkeys…</p>';
+    const credentials = await listPasskeys();
+    list.innerHTML = credentials.length
+      ? `<h3>Registered devices</h3>${credentials.map(credential => `
+          <div class="passkey-item">
+            <span><b>${escapeHtml(credential.name)}</b><small>Added ${escapeHtml(new Date(credential.createdAt).toLocaleDateString())}</small></span>
+            <button type="button" class="text-button" data-remove-passkey="${escapeHtml(credential.id)}">Remove</button>
+          </div>`).join('')}`
+      : '<p class="form-note">No passkeys registered yet.</p>';
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    try {
+      const name = new FormData(form).get('name').trim();
+      await registerPasskey(name);
+      form.reset();
+      notify('Passkey registered. You can use it instead of your authenticator code next time you sign in.', 'success');
+      await refresh();
+    } catch (error) { notify(error.message || 'Passkey registration failed.', 'error'); }
+    finally { button.disabled = !supported; }
+  });
+
+  list.addEventListener('click', async event => {
+    const button = event.target.closest('[data-remove-passkey]');
+    if (!button) return;
+    if (!window.confirm('Remove this passkey from your account?')) return;
+    button.disabled = true;
+    try {
+      await removePasskey(button.dataset.removePasskey);
+      notify('Passkey removed.', 'success');
+      await refresh();
+    } catch (error) {
+      notify(error.message || 'Could not remove the passkey.', 'error');
+      button.disabled = false;
+    }
+  });
+
+  refresh().catch(error => {
+    list.textContent = 'Could not load passkeys.';
+    notify(error.message || 'Could not load passkeys.', 'error');
+  });
 }
 
 function requiredFile(id) {

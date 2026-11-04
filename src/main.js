@@ -1,3 +1,62 @@
+I’ll provide the complete `main.js` with both fixes included: direct QR rendering and cleanup of a matching unverified enrollment before retrying.
+
+Read , lines 1 to 80
+Completed with input: {
+  "path": "C:\\Users\\Admin\\Downloads\\CampusTools-starter\\CampusTools\\src\\main.js",
+  "view_range": [
+    1,
+    80
+  ]
+}
+
+Read , lines 81 to 160
+Completed with input: {
+  "path": "C:\\Users\\Admin\\Downloads\\CampusTools-starter\\CampusTools\\src\\main.js",
+  "view_range": [
+    81,
+    160
+  ]
+}
+
+Read , lines 161 to 260
+Completed with input: {
+  "path": "C:\\Users\\Admin\\Downloads\\CampusTools-starter\\CampusTools\\src\\main.js",
+  "view_range": [
+    161,
+    260
+  ]
+}
+
+Read , lines 235 to 270
+Completed with input: {
+  "path": "C:\\Users\\Admin\\Downloads\\CampusTools-starter\\CampusTools\\src\\main.js",
+  "view_range": [
+    235,
+    270
+  ]
+}
+
+Read , lines 160 to 197
+Completed with input: {
+  "path": "C:\\Users\\Admin\\Downloads\\CampusTools-starter\\CampusTools\\src\\main.js",
+  "view_range": [
+    160,
+    197
+  ]
+}
+
+Read , lines 198 to 235
+Completed with input: {
+  "path": "C:\\Users\\Admin\\Downloads\\CampusTools-starter\\CampusTools\\src\\main.js",
+  "view_range": [
+    198,
+    235
+  ]
+}
+
+Replace the entire contents of `src/main.js` with this version. It includes the QR display fix and removes only a matching **unverified** “CampusTools authenticator” factor before starting a new enrollment.
+
+```js
 import './style.css';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 import { getProfile, listVerifiedTotpFactors, requireAAL2, signOut } from './lib/auth.js';
@@ -140,6 +199,19 @@ async function continueToMfa() {
 }
 
 async function beginEnrollment() {
+  const { data: factorData, error: factorError } = await supabase.auth.mfa.listFactors();
+  if (factorError) throw factorError;
+
+  const staleFactors = (factorData.totp || []).filter(factor =>
+    factor.status === 'unverified' &&
+    factor.friendly_name === 'CampusTools authenticator'
+  );
+
+  for (const factor of staleFactors) {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+    if (error) throw error;
+  }
+
   const { data, error } = await supabase.auth.mfa.enroll({
     factorType: 'totp',
     friendlyName: 'CampusTools authenticator'
@@ -300,7 +372,8 @@ if (!isSupabaseConfigured) {
 } else {
   landing();
 
-  // Sign-in is handled by the login form; don't run the MFA flow twice.
+  // Sign-in is handled explicitly by the login form. Avoid running the MFA
+  // flow twice from both the form handler and SIGNED_IN auth event.
   supabase.auth.getSession().then(async ({ data, error }) => {
     if (error || !data.session) return;
 
@@ -315,3 +388,6 @@ if (!isSupabaseConfigured) {
     }
   });
 }
+```
+
+Save it, commit the change to `main`, and wait for GitHub Pages deployment to complete. Then reload your page and try again.

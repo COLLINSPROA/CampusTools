@@ -58,7 +58,9 @@ In Authentication settings:
 - Enable Email provider.
 - Enable email confirmations if desired.
 - Set Site URL to your local development URL while testing, then your deployed site URL.
-- Add your local and deployed callback URLs to the allowed redirect URLs.
+- Add your local and deployed app URLs to the allowed redirect URLs. Password recovery returns to the current app URL.
+- Configure an SMTP provider under Authentication > SMTP Settings for reliable recovery-email delivery. Supabase's default email service is rate-limited and intended for testing.
+- Customize the password recovery email template under Authentication > Email Templates if needed.
 - Keep TOTP MFA enabled.
 
 For local development, allow `http://localhost:5173/**`.

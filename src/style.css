@@ -253,7 +253,6 @@ main { width: min(1240px, 100%); margin: 0 auto; padding: 0 30px; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 35px; margin-bottom: 38px; }
 .section-heading h2, .auth-intro h2 { margin: 13px 0 0; font-size: clamp(35px, 4vw, 47px); letter-spacing: -.055em; }
 .section-heading > p { max-width: 370px; margin: 0 0 3px; color: var(--muted); font-size: 14px; line-height: 1.8; }
-
 .tool-discovery { margin: 0 0 17px; }
 .tool-search-label { display: block; margin-bottom: 8px; color: #46566d; font-size: 12px; font-weight: 700; }
 .tool-discovery-row { display: flex; align-items: center; gap: 14px; }
@@ -392,12 +391,11 @@ main { width: min(1240px, 100%); margin: 0 auto; padding: 0 30px; }
   font-size: 13px;
   transition: border-color .18s ease, box-shadow .18s ease;
 }
-.form-stack input:focus, .workspace-card input:focus, .workspace-card textarea:focus, .control-row input:focus, .control-row select:focus {
+.form-stack input:focus, .workspace-card input:focus, .workspace-card select:focus, .workspace-card textarea:focus, .control-row input:focus, .control-row select:focus {
   border-color: #7894f3;
   box-shadow: 0 0 0 4px rgb(49 94 232 / 11%);
 }
 .form-note { color: #7f8b9b; font-size: 11px; line-height: 1.65; text-align: center; }
-
 .notice {
   position: fixed;
   z-index: 20;
@@ -414,10 +412,8 @@ main { width: min(1240px, 100%); margin: 0 auto; padding: 0 30px; }
 }
 .notice.success { border-color: #c5ead8; background: #eaf8f1; color: #176b4c; }
 .notice.error { border-color: #f4caca; background: #fff0f0; color: #a32e38; }
-
 .setup-warning { padding: 22px; border: 1px solid #f1dfae; border-radius: 14px; background: #fff9e9; }
 .setup-warning p { color: #75623b; font-size: 12px; line-height: 1.7; }
-
 .mfa-panel h2 { margin: 12px 0; font: 800 25px Manrope, sans-serif; letter-spacing: -1px; }
 .mfa-panel > p { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .qr-frame { display: grid; width: 190px; height: 190px; place-items: center; margin: 20px auto; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: white; }
@@ -426,6 +422,23 @@ main { width: min(1240px, 100%); margin: 0 auto; padding: 0 30px; }
 .mfa-panel summary { cursor: pointer; font-weight: 600; }
 .secret { display: block; overflow-wrap: anywhere; margin-top: 8px; padding: 10px; border-radius: 8px; background: #f3f5f8; }
 .text-button { min-height: 42px; padding: 12px; border: 0; background: transparent; color: var(--blue); cursor: pointer; font-size: 12px; font-weight: 700; }
+.factor-options { display: grid; gap: 10px; margin-top: 20px; }
+.security-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .8fr); gap: 18px 30px; margin: 0 0 25px; padding: 23px; border: 1px solid var(--line); border-radius: 15px; background: white; }
+.security-settings-copy h2 { margin: 7px 0; font: 700 21px Manrope, sans-serif; }
+.security-settings-copy p { max-width: 470px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.passkey-add-form { align-self: center; }
+.passkey-add-form > label { display: block; margin-bottom: 7px; color: #46566d; font-size: 12px; font-weight: 700; }
+.passkey-add-row { display: flex; gap: 8px; }
+.passkey-add-row input { min-width: 0; flex: 1; min-height: 42px; padding: 10px 12px; border: 1px solid #dce3ed; border-radius: 9px; color: var(--navy); font-size: 12px; }
+.passkey-add-row button { white-space: nowrap; }
+.passkey-add-form .form-note { margin-top: 8px; text-align: left; }
+.passkey-list { grid-column: 1 / -1; }
+.passkey-list h3 { margin: 0 0 8px; font: 700 13px Manrope, sans-serif; }
+.passkey-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.passkey-item span { display: grid; gap: 4px; }
+.passkey-item b { font-size: 12px; }
+.passkey-item small { color: var(--muted); font-size: 10px; }
+.passkey-item .text-button { flex: 0 0 auto; }
 
 .workspace-head { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 55px 0 30px; }
 .workspace-head h1 { margin: 10px 0; font: 800 38px Manrope, sans-serif; letter-spacing: -1.7px; }
@@ -511,6 +524,8 @@ footer small { color: #8793a3; font-size: 10px; }
   .security-band .btn { width: 100%; }
   .auth-section { grid-template-columns: 1fr; gap: 25px; padding: 25px 2% 65px; }
   .auth-card { padding: 21px; }
+  .security-settings { grid-template-columns: 1fr; }
+  .passkey-list { grid-column: auto; }
   .workspace-head { align-items: flex-start; flex-direction: column; padding: 38px 0 22px; }
   .workspace-head h1 { font-size: 32px; }
   .workspace-head p { margin-bottom: 0; }
@@ -527,6 +542,7 @@ footer small { color: #8793a3; font-size: 10px; }
   .art-main { width: 84%; }
   .art-small { right: -3%; }
   .button-pair { flex-direction: column; }
+  .passkey-add-row { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {

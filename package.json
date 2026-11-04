@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@imgly/background-removal": "^1.5.5",
+    "@simplewebauthn/browser": "^13.2.2",
     "@supabase/supabase-js": "^2.49.1",
     "mammoth": "^1.9.0",
     "pdf-lib": "^1.17.1",

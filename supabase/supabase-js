@@ -1,0 +1,23 @@
+import { corsHeaders } from 'npm:@supabase/supabase-js@^2/cors'
+
+Deno.serve(async (req) => {
+  // 1. Handle the preflight request (OPTIONS)
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    // 2. Your function logic here
+    const { name } = await req.json()
+    return new Response(JSON.stringify({ message: `Hello ${name}` }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
+    })
+  } catch (error) {
+    // 3. Include headers even in error responses
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 400,
+    })
+  }
+})

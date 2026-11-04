@@ -12,8 +12,8 @@ let currentFactorId = null;
 let currentChallengeId = null;
 
 const icon = (name) => ({
-  image:'▧', file:'▤', pdf:'PDF', word:'W', sheet:'X', shield:'◆',
-  user:'●', lock:'▣', arrow:'→', spark:'✦'
+  image: '▧', file: '▤', pdf: 'PDF', word: 'W', sheet: 'X', shield: '◆',
+  user: '●', lock: '▣', arrow: '→', spark: '✦'
 }[name] || '•');
 
 function shell(content) {
@@ -29,7 +29,10 @@ function shell(content) {
 
 function notify(message, type = 'info') {
   const el = document.querySelector('#notice');
-  if (!el) { alert(message); return; }
+  if (!el) {
+    alert(message);
+    return;
+  }
   el.className = `notice ${type}`;
   el.textContent = message;
   el.hidden = false;
@@ -74,27 +77,36 @@ function landing() {
 function renderAuthCard(mode = 'login') {
   const card = document.querySelector('#auth-card');
   if (!card) return;
+
   card.innerHTML = `
-    <div class="auth-tabs"><button class="${mode==='login'?'active':''}" data-mode="login">Sign in</button><button class="${mode==='register'?'active':''}" data-mode="register">Create account</button></div>
+    <div class="auth-tabs"><button class="${mode === 'login' ? 'active' : ''}" data-mode="login">Sign in</button><button class="${mode === 'register' ? 'active' : ''}" data-mode="register">Create account</button></div>
     <form id="auth-form" class="form-stack">
-      ${mode==='register'?'<label>Full name<input name="name" required autocomplete="name" placeholder="Your name"></label>':''}
+      ${mode === 'register' ? '<label>Full name<input name="name" required autocomplete="name" placeholder="Your name"></label>' : ''}
       <label>Email address<input name="email" type="email" required autocomplete="email" placeholder="you@example.com"></label>
-      <label>Password<input name="password" type="password" required minlength="8" autocomplete="${mode==='login'?'current-password':'new-password'}" placeholder="At least 8 characters"></label>
-      <button class="btn primary full" type="submit">${mode==='login'?'Sign in securely':'Create free account'} <span>→</span></button>
+      <label>Password<input name="password" type="password" required minlength="8" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" placeholder="At least 8 characters"></label>
+      <button class="btn primary full" type="submit">${mode === 'login' ? 'Sign in securely' : 'Create free account'} <span>→</span></button>
       <p class="form-note">By continuing, you agree to use CampusTools responsibly.</p>
     </form>`;
-  card.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => renderAuthCard(button.dataset.mode)));
+
+  card.querySelectorAll('[data-mode]').forEach(button => {
+    button.addEventListener('click', () => renderAuthCard(button.dataset.mode));
+  });
+
   card.querySelector('#auth-form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const email = form.get('email').trim();
     const password = form.get('password');
+
     try {
       if (mode === 'register') {
         const { error } = await supabase.auth.signUp({
-          email, password,
-          options: { data: { display_name: form.get('name').trim() },
-            emailRedirectTo: window.location.origin + window.location.pathname }
+          email,
+          password,
+          options: {
+            data: { display_name: form.get('name').trim() },
+            emailRedirectTo: window.location.origin + window.location.pathname
+          }
         });
         if (error) throw error;
         notify('Account created. Check your email to confirm your address, then sign in.', 'success');
@@ -103,67 +115,99 @@ function renderAuthCard(mode = 'login') {
         if (error) throw error;
         await continueToMfa();
       }
-    } catch (error) { notify(error.message, 'error'); }
+    } catch (error) {
+      notify(error.message, 'error');
+    }
   });
 }
 
 async function continueToMfa() {
   const factors = await listVerifiedTotpFactors();
   if (!factors.length) return beginEnrollment();
+
   const factor = factors[0];
   currentFactorId = factor.id;
+
   const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (error) throw error;
   if (data.currentLevel === 'aal2') return enterWorkspace();
+
   const challenge = await supabase.auth.mfa.challenge({ factorId: currentFactorId });
   if (challenge.error) throw challenge.error;
+
   currentChallengeId = challenge.data.id;
   renderMfaChallenge();
 }
 
 async function beginEnrollment() {
   const { data, error } = await supabase.auth.mfa.enroll({
-    factorType: 'totp', friendlyName: 'CampusTools authenticator'
+    factorType: 'totp',
+    friendlyName: 'CampusTools authenticator'
   });
   if (error) throw error;
+
   currentFactorId = data.id;
   renderMfaEnrollment(data.totp.qr_code, data.totp.secret);
 }
 
-function renderMfaEnrollment(qrSvg, secret) {
+function renderMfaEnrollment(qrCode, secret) {
   const card = document.querySelector('#auth-card');
-  card.innerHTML = `<div class="mfa-panel"><div class="tool-icon purple">◇</div><span class="eyebrow">SECURITY SETUP · REQUIRED</span><h2>Set up your authenticator</h2><p>Scan this QR code using Aegis, Google Authenticator or another TOTP app.</p><div class="qr-frame"><img alt="Authenticator setup QR code" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg)}"></div><details><summary>Can't scan the QR code?</summary><code class="secret">${escapeHtml(secret)}</code></details><form id="enroll-form" class="form-stack"><label>Six-digit verification code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label><button class="btn primary full">Verify and secure account →</button></form><p class="form-note">Save your authenticator safely. If you lose access, contact the site administrator for account recovery.</p></div>`;
+
+  card.innerHTML = `<div class="mfa-panel"><div class="tool-icon purple">◇</div><span class="eyebrow">SECURITY SETUP · REQUIRED</span><h2>Set up your authenticator</h2><p>Scan this QR code using Aegis, Google Authenticator or another TOTP app.</p><div class="qr-frame"><img id="enrollment-qr" alt="Authenticator setup QR code"></div><details><summary>Can't scan the QR code?</summary><code class="secret">${escapeHtml(secret)}</code></details><form id="enroll-form" class="form-stack"><label>Six-digit verification code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label><button class="btn primary full">Verify and secure account →</button></form><p class="form-note">Save your authenticator safely. If you lose access, contact the site administrator for account recovery.</p></div>`;
+
+  card.querySelector('#enrollment-qr').src = qrCode;
+
   card.querySelector('#enroll-form').addEventListener('submit', async event => {
     event.preventDefault();
     const code = new FormData(event.currentTarget).get('code').trim();
+
     try {
-      const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: currentFactorId, code });
+      const { error } = await supabase.auth.mfa.challengeAndVerify({
+        factorId: currentFactorId,
+        code
+      });
       if (error) throw error;
       await enterWorkspace();
-    } catch (error) { notify(error.message, 'error'); }
+    } catch (error) {
+      notify(error.message, 'error');
+    }
   });
 }
 
 function renderMfaChallenge() {
   const card = document.querySelector('#auth-card');
   card.innerHTML = `<div class="mfa-panel"><div class="tool-icon purple">◇</div><span class="eyebrow">TWO-FACTOR VERIFICATION</span><h2>Check it's really you.</h2><p>Open your authenticator app and enter the current six-digit CampusTools code.</p><form id="challenge-form" class="form-stack"><label>Authenticator code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label><button class="btn primary full">Verify and continue →</button></form><button id="back-login" class="text-button">Back to sign in</button></div>`;
+
   card.querySelector('#challenge-form').addEventListener('submit', async event => {
     event.preventDefault();
     const code = new FormData(event.currentTarget).get('code').trim();
+
     try {
-      const { error } = await supabase.auth.mfa.verify({ factorId: currentFactorId, challengeId: currentChallengeId, code });
+      const { error } = await supabase.auth.mfa.verify({
+        factorId: currentFactorId,
+        challengeId: currentChallengeId,
+        code
+      });
       if (error) throw error;
       await enterWorkspace();
-    } catch (error) { notify(error.message, 'error'); }
+    } catch (error) {
+      notify(error.message, 'error');
+    }
   });
-  card.querySelector('#back-login').addEventListener('click', async () => { await signOut(); renderAuthCard(); });
+
+  card.querySelector('#back-login').addEventListener('click', async () => {
+    await signOut();
+    renderAuthCard();
+  });
 }
 
 async function enterWorkspace() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) throw error || new Error('Please sign in again.');
+
   const aal2 = await requireAAL2();
   if (!aal2) throw new Error('MFA verification is required before using CampusTools.');
+
   activeUser = user;
   activeProfile = await getProfile(user.id);
   renderWorkspace();
@@ -172,10 +216,14 @@ async function enterWorkspace() {
 function renderWorkspace() {
   const role = activeProfile.role;
   const top = document.querySelector('#top-actions');
-  if (top) top.innerHTML = `<span class="user-chip">${escapeHtml(activeProfile.display_name || activeUser.email)}</span><button id="logout" class="btn outline small">Sign out</button>`;
+
+  if (top) {
+    top.innerHTML = `<span class="user-chip">${escapeHtml(activeProfile.display_name || activeUser.email)}</span><button id="logout" class="btn outline small">Sign out</button>`;
+  }
+
   const main = document.querySelector('main');
   main.innerHTML = `
-    <section class="workspace-head"><div><span class="eyebrow">YOUR SECURE WORKSPACE</span><h1>Welcome${activeProfile.display_name ? ', '+escapeHtml(activeProfile.display_name.split(' ')[0]) : ''}.</h1><p>Choose a tool to get started. Your files are processed locally where possible.</p></div><span class="secure-pill">◇ MFA verified</span></section>
+    <section class="workspace-head"><div><span class="eyebrow">YOUR SECURE WORKSPACE</span><h1>Welcome${activeProfile.display_name ? ', ' + escapeHtml(activeProfile.display_name.split(' ')[0]) : ''}.</h1><p>Choose a tool to get started. Your files are processed locally where possible.</p></div><span class="secure-pill">◇ MFA verified</span></section>
     <div id="notice" class="notice" hidden></div>
     <section class="workspace-grid">
       <div class="workspace-card"><div class="tool-icon purple">▧</div><span class="tag">IMAGE TOOLS</span><h3>Remove background</h3><p>Remove an image background and download a transparent PNG.</p><input id="bg-file" type="file" accept="image/*"><button id="bg-run" class="btn primary full">Remove background</button></div>
@@ -191,9 +239,19 @@ function renderWorkspace() {
     <section class="limitations"><b>About file privacy and compatibility</b><p>Most tools in this starter build run in your browser. Very large files may use substantial device memory. DOCX-to-PDF currently exports extracted text only; complex page layout is not preserved. Full PDF-to-Word and PowerPoint conversion require a separate conversion engine and are planned for a later phase.</p></section>
     ${role === 'admin' ? `<section class="admin-panel"><span class="eyebrow">ADMINISTRATION</span><h2>Administrator access</h2><p>You are signed in with the administrator role. Admin-only management features can be added here.</p><span class="secure-pill">Admin role · MFA verified</span></section>` : ''}
   `;
-  document.querySelector('#logout')?.addEventListener('click', async () => { await signOut(); activeUser = null; activeProfile = null; location.reload(); });
+
+  document.querySelector('#logout')?.addEventListener('click', async () => {
+    await signOut();
+    activeUser = null;
+    activeProfile = null;
+    location.reload();
+  });
+
   bindTool('bg-run', async () => removeImageBackground(requiredFile('bg-file')));
-  bindTool('image-run', async () => convertOrResizeImage(requiredFile('image-file'), { format: value('image-format'), maxWidth: Number(value('image-width')) || 0 }));
+  bindTool('image-run', async () => convertOrResizeImage(requiredFile('image-file'), {
+    format: value('image-format'),
+    maxWidth: Number(value('image-width')) || 0
+  }));
   bindTool('merge-run', async () => mergePdfs([...document.querySelector('#merge-files').files]));
   bindTool('split-run', async () => splitPdf(requiredFile('split-file'), value('page-range')));
   bindTool('images-pdf-run', async () => imagesToPdf([...document.querySelector('#images-pdf-files').files]));
@@ -209,15 +267,30 @@ function requiredFile(id) {
   if (!file) throw new Error('Please choose a file first.');
   return file;
 }
-function value(id) { return document.getElementById(id).value; }
+
+function value(id) {
+  return document.getElementById(id).value;
+}
+
 function bindTool(id, action) {
   document.getElementById(id)?.addEventListener('click', async () => {
-    try { await action(); notify('Your file is ready to download.', 'success'); }
-    catch (error) { notify(error.message || 'The operation failed.', 'error'); }
+    try {
+      await action();
+      notify('Your file is ready to download.', 'success');
+    } catch (error) {
+      notify(error.message || 'The operation failed.', 'error');
+    }
   });
 }
+
 function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  return String(value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
 }
 
 if (!isSupabaseConfigured) {
@@ -226,13 +299,19 @@ if (!isSupabaseConfigured) {
   card.innerHTML = `<div class="setup-warning"><div class="tool-icon yellow">!</div><h3>Connect your Supabase project</h3><p>Copy <code>.env.example</code> to <code>.env</code>, then add your Supabase Project URL and publishable key. See README.md for setup instructions.</p></div>`;
 } else {
   landing();
-  // Sign-in is handled explicitly by the login form. Avoid running the MFA
-  // flow twice from both the form handler and SIGNED_IN auth event.
+
+  // Sign-in is handled by the login form; don't run the MFA flow twice.
   supabase.auth.getSession().then(async ({ data, error }) => {
     if (error || !data.session) return;
+
     try {
-      if (await requireAAL2()) await enterWorkspace();
-      else await continueToMfa();
-    } catch (error) { notify(error.message, 'error'); }
+      if (await requireAAL2()) {
+        await enterWorkspace();
+      } else {
+        await continueToMfa();
+      }
+    } catch (error) {
+      notify(error.message, 'error');
+    }
   });
 }
